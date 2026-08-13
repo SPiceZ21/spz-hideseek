@@ -65,10 +65,9 @@ local function broadcastLobby()
     end
 end
 
-local function refundLobby(reason)
-    for src, e in pairs(lobby) do
-        payPid(e.pid, e.stake, "Hide & Seek refund")
-        notify(src, ("Lobby cancelled (%s) — %d refunded"):format(reason, e.stake), "warning")
+local function cancelLobby(reason)
+    for src in pairs(lobby) do
+        notify(src, ("Lobby cancelled — %s"):format(reason), "warning")
     end
     lobby = {}
     lobbyArmed = false
@@ -89,19 +88,16 @@ local function endRound(winnerRole, reason)
         end
     end
 
-    local rake = Config.HouseRake or 0.0
-    local pool = math.floor(r.pot * (1 - rake))
-    local share = (#winners > 0) and math.floor(pool / #winners) or 0
-
+    local reward = Config.WinReward or 0
     for _, p in ipairs(winners) do
-        payPid(p.pid, share, "Hide & Seek won")
+        if reward > 0 then payPid(p.pid, reward, "Hide & Seek won") end
     end
 
     -- Tell everyone + send them home.
     for src, p in pairs(r.players) do
         local won = (p.role == winnerRole and (winnerRole == "seeker" or p.alive))
         TriggerClientEvent("spz-hideseek:over", src, {
-            winner = winnerRole, reason = reason, won = won, payout = won and share or 0,
+            winner = winnerRole, reason = reason, won = won, payout = won and reward or 0,
         })
     end
 
@@ -114,7 +110,7 @@ local function endRound(winnerRole, reason)
 
     pcall(function()
         exports["spz-log"]:Log("minigame", "Hide & Seek",
-            ("%s won (%s). Pot %d split %d ways."):format(winnerRole, reason, pool, #winners), "success")
+            ("%s won (%s). %d winner(s) @ %d each."):format(winnerRole, reason, #winners, reward), "success")
     end)
     log(("round over: %s (%s)"):format(winnerRole, reason))
 end
@@ -123,7 +119,7 @@ local function startRound()
     lobbyArmed = false
     local n = lobbyCount()
     if n < Config.MinPlayers then
-        refundLobby("not enough players")
+        cancelLobby("not enough players")
         return
     end
 
@@ -141,7 +137,7 @@ local function startRound()
     end
 
     round = {
-        bucketId = bucketId, players = {}, pot = 0,
+        bucketId = bucketId, players = {},
         phase = "hide",
         hideEndsAt = GetGameTimer() + (Config.HideTimeSec * 1000),
         endsAt = GetGameTimer() + ((Config.HideTimeSec + Config.RoundTimeSec) * 1000),
@@ -150,8 +146,7 @@ local function startRound()
 
     for i, m in ipairs(roster) do
         local role = (i <= seekerN) and "seeker" or "hider"
-        round.players[m.src] = { pid = m.pid, name = m.name, stake = m.stake, role = role, alive = true }
-        round.pot = round.pot + m.stake
+        round.players[m.src] = { pid = m.pid, name = m.name, role = role, alive = true }
         if role == "seeker" then round.seekers[#round.seekers + 1] = m.src end
         if bucketId ~= 0 then exports["spz-core"]:AssignPlayerToBucket(m.src, bucketId) end
     end
@@ -173,7 +168,7 @@ local function startRound()
         })
     end
 
-    log(("round start: %d players (%d seekers), pot %d"):format(#roster, seekerN, round.pot))
+    log(("round start: %d players (%d seekers, free)"):format(#roster, seekerN))
 end
 
 -- ── Server tick: phase + proximity catches + win check ────────────────────────
@@ -249,9 +244,8 @@ RegisterCommand(Config.Command, function(source)
     if round then notify(src, "A round is in progress — wait for the next.", "warning"); return end
 
     if lobby[src] then
-        payPid(lobby[src].pid, lobby[src].stake, "Hide & Seek refund")
         lobby[src] = nil
-        notify(src, "Left the lobby — stake refunded.", "info")
+        notify(src, "Left the lobby.", "info")
         return
     end
 
@@ -259,11 +253,9 @@ RegisterCommand(Config.Command, function(source)
 
     local pid, prof = pidOf(src)
     if not pid then notify(src, "Profile not ready.", "error"); return end
-    if (prof.credits or 0) < Config.Stake then notify(src, "Not enough credits.", "error"); return end
-    if not escrow(src, Config.Stake) then notify(src, "Couldn't stake.", "error"); return end
 
-    lobby[src] = { pid = pid, name = prof.username or GetPlayerName(src), stake = Config.Stake }
-    notify(src, ("Joined Hide & Seek (staked %d)."):format(Config.Stake), "success")
+    lobby[src] = { pid = pid, name = prof.username or GetPlayerName(src) }
+    notify(src, "Joined Hide & Seek (free to play).", "success")
     broadcastLobby()
 
     if not lobbyArmed then
@@ -287,7 +279,6 @@ end, false)
 AddEventHandler("playerDropped", function()
     local src = source
     if lobby[src] then
-        payPid(lobby[src].pid, lobby[src].stake, "Hide & Seek refund")
         lobby[src] = nil
         return
     end

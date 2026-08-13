@@ -4,9 +4,8 @@ Config = {}
 Config.Command      = "hideseek"   -- join/leave the lobby
 Config.StartCommand = "hsstart"    -- force-start the lobby early
 
--- ── Wager ───────────────────────────────────────────────────────────────────
-Config.Stake     = 250     -- credits staked to enter (winners split the pot)
-Config.HouseRake = 0.0     -- 0 = pure pot split
+-- ── Reward (FREE to join — no entry fee) ────────────────────────────────────
+Config.WinReward = 500     -- flat credits paid to each winner (0 = no reward)
 
 -- ── Lobby ───────────────────────────────────────────────────────────────────
 Config.MinPlayers   = 3
