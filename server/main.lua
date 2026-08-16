@@ -1,6 +1,6 @@
 -- server/main.lua — Traffic Hide & Seek
--- Lobby with credit escrow → roles (hiders/seekers) → isolated traffic bucket →
--- server-authoritative proximity catches → pot split to the winning side.
+-- Free-to-join lobby → roles (hiders/seekers) → isolated traffic bucket →
+-- server-authoritative proximity catches → flat WinReward to the winning side.
 -- Catches are distance-based on purpose: the global no-collision means cars pass
 -- through each other, so "ram to catch" can't work — seekers catch by closing in.
 
@@ -30,13 +30,6 @@ local function srcFromPid(pid)
     return nil
 end
 
-local function escrow(src, amt)
-    local ok, prof = pcall(function() return exports["spz-identity"]:GetProfile(src) end)
-    if not ok or not prof then return false end
-    if (prof.credits or 0) < amt then return false end
-    exports["spz-identity"]:UpdateProfile(src, { credits = (prof.credits or 0) - amt })
-    return true
-end
 
 local function payPid(pid, amt, reason)
     if amt <= 0 then return end
