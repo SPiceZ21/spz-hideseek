@@ -1,14 +1,16 @@
--- server/main.lua — Traffic Hide & Seek
--- Free-to-join lobby → roles (hiders/seekers) → isolated traffic bucket →
--- server-authoritative proximity catches → flat WinReward to the winning side.
--- Catches are distance-based on purpose: the global no-collision means cars pass
--- through each other, so "ram to catch" can't work — seekers catch by closing in.
+-- server/main.lua — RC Hide & Seek
+-- Free-to-join lobby → roles (hiders/seekers) → everyone spawns as a tiny RC
+-- car inside one contained zone (Config.Arena/ZoneRadius) → server-authoritative
+-- proximity catches → flat WinReward to the winning side. Catches are
+-- distance-based on purpose: the global no-collision means cars pass through
+-- each other, so "ram to catch" can't work — seekers catch by closing in.
 
 local Log = SPZ and SPZ.Logger and SPZ.Logger("spz-hideseek") or nil
 local function log(m) if Log then Log.info(m) else print("[hideseek] " .. m) end end
 
-local lobby = {}    -- [src] = { pid, name, stake }
+local lobby = {}    -- [src] = { pid, name, stake, carPref }
 local lobbyArmed = false
+local lobbyArmedAt = nil
 local round = nil   -- see startRound
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -45,6 +47,11 @@ local function shuffle(t)
     for i = #t, 2, -1 do local j = math.random(i); t[i], t[j] = t[j], t[i] end
 end
 
+local function inList(list, v)
+    for _, x in ipairs(list) do if x == v then return true end end
+    return false
+end
+
 -- ── Lobby ───────────────────────────────────────────────────────────────────
 
 local function lobbyCount()
@@ -64,6 +71,28 @@ local function cancelLobby(reason)
     end
     lobby = {}
     lobbyArmed = false
+    lobbyArmedAt = nil
+end
+
+-- Snapshot the lobby/round for a given viewer — feeds the queue menu.
+local function lobbyStateFor(src)
+    local roster = {}
+    for s, e in pairs(lobby) do roster[#roster + 1] = { name = e.name, isMe = (s == src) } end
+    table.sort(roster, function(a, b) return a.name < b.name end)
+
+    return {
+        inRound = round ~= nil and round.players[src] ~= nil,
+        roundLive = round ~= nil,
+        inLobby = lobby[src] ~= nil,
+        count = lobbyCount(),
+        min = Config.MinPlayers,
+        max = Config.MaxPlayers,
+        armed = lobbyArmed,
+        armedRemain = lobbyArmed and math.max(0, (Config.LobbyWaitSec or 30) - math.floor((GetGameTimer() - lobbyArmedAt) / 1000)) or nil,
+        roster = roster,
+        carPref = lobby[src] and lobby[src].carPref or nil,
+        models = Config.HiderModels or { "blista" },
+    }
 end
 
 -- ── Round ─────────────────────────────────────────────────────────────────────
@@ -110,6 +139,7 @@ end
 
 local function startRound()
     lobbyArmed = false
+    lobbyArmedAt = nil
     local n = lobbyCount()
     if n < Config.MinPlayers then
         cancelLobby("not enough players")
@@ -118,15 +148,16 @@ local function startRound()
 
     -- Roster + roles
     local roster = {}
-    for src, e in pairs(lobby) do roster[#roster + 1] = { src = src, pid = e.pid, name = e.name, stake = e.stake } end
+    for src, e in pairs(lobby) do roster[#roster + 1] = { src = src, pid = e.pid, name = e.name, stake = e.stake, carPref = e.carPref } end
     shuffle(roster)
     local seekerN = math.max(1, math.min(#roster - 1, math.floor(#roster * (Config.SeekerRatio or 0.34))))
 
-    -- Bucket with NPC traffic enabled (so hiders have cars to blend with).
+    -- Isolated bucket, traffic off — it's a contained RC-car zone, not a
+    -- blend-into-traffic street.
     local bucketId = 0
     if GetResourceState("spz-core") == "started" then
         bucketId = exports["spz-core"]:CreateBucket("hideseek")
-        SetRoutingBucketPopulationEnabled(bucketId, true)
+        SetRoutingBucketPopulationEnabled(bucketId, false)
     end
 
     round = {
@@ -137,9 +168,12 @@ local function startRound()
         seekers = {},
     }
 
+    local pool = Config.HiderModels or { "blista" }
+
     for i, m in ipairs(roster) do
         local role = (i <= seekerN) and "seeker" or "hider"
-        round.players[m.src] = { pid = m.pid, name = m.name, role = role, alive = true }
+        local model = (m.carPref and inList(pool, m.carPref)) and m.carPref or pool[1]
+        round.players[m.src] = { pid = m.pid, name = m.name, role = role, alive = true, model = model }
         if role == "seeker" then round.seekers[#round.seekers + 1] = m.src end
         if bucketId ~= 0 then exports["spz-core"]:AssignPlayerToBucket(m.src, bucketId) end
     end
@@ -151,13 +185,14 @@ local function startRound()
 
     for src, p in pairs(round.players) do
         TriggerClientEvent("spz-hideseek:start", src, {
-            role      = p.role,
-            arena     = Config.Arena,
-            spread    = Config.SpawnSpread,
-            hideTime  = Config.HideTimeSec,
-            roundTime = Config.RoundTimeSec,
-            models    = Config.HiderModels,
-            roles     = roles,
+            role       = p.role,
+            arena      = Config.Arena,
+            spread     = Config.SpawnSpread,
+            zoneRadius = Config.ZoneRadius,
+            hideTime   = Config.HideTimeSec,
+            roundTime  = Config.RoundTimeSec,
+            models     = { p.model },
+            roles      = roles,
         })
     end
 
@@ -229,10 +264,9 @@ CreateThread(function()
     end
 end)
 
--- ── Commands ──────────────────────────────────────────────────────────────────
-
-RegisterCommand(Config.Command, function(source)
-    local src = source
+-- ── Join / leave ──────────────────────────────────────────────────────────────
+-- Shared by the /hideseek command and the queue menu's Join/Leave button.
+local function toggleJoin(src)
     if round and round.players[src] then notify(src, "You're in a round.", "error"); return end
     if round then notify(src, "A round is in progress — wait for the next.", "warning"); return end
 
@@ -253,11 +287,16 @@ RegisterCommand(Config.Command, function(source)
 
     if not lobbyArmed then
         lobbyArmed = true
+        lobbyArmedAt = GetGameTimer()
         SetTimeout((Config.LobbyWaitSec or 30) * 1000, function()
             if not round and lobbyArmed then startRound() end
         end)
     end
-end, false)
+end
+
+-- ── Commands ──────────────────────────────────────────────────────────────────
+
+RegisterCommand(Config.Command, function(source) toggleJoin(source) end, false)
 
 RegisterCommand(Config.StartCommand, function(source)
     local src = source
@@ -266,6 +305,61 @@ RegisterCommand(Config.StartCommand, function(source)
     if lobbyCount() < Config.MinPlayers then notify(src, ("Need %d players."):format(Config.MinPlayers), "error"); return end
     startRound()
 end, false)
+
+-- ── Queue menu callbacks ────────────────────────────────────────────────────
+
+lib.callback.register("spz-hideseek:lobbyState", function(src)
+    return lobbyStateFor(src)
+end)
+
+lib.callback.register("spz-hideseek:joinToggle", function(src)
+    toggleJoin(src)
+    return lobbyStateFor(src)
+end)
+
+lib.callback.register("spz-hideseek:setCar", function(src, model)
+    local e = lobby[src]
+    if not e then return { ok = false, error = "Join the lobby first." } end
+    if not inList(Config.HiderModels or {}, model) then return { ok = false, error = "Not an available car." } end
+    e.carPref = model
+    return { ok = true }
+end)
+
+-- Online players eligible to invite: not already queued, not in a live round.
+lib.callback.register("spz-hideseek:online", function(src)
+    local list = {}
+    for _, pid in ipairs(GetPlayers()) do
+        local sid = tonumber(pid)
+        if sid ~= src and not lobby[sid] and not (round and round.players[sid]) then
+            local ok, profile = pcall(function() return exports["spz-identity"]:GetProfile(sid) end)
+            local name = (ok and profile and profile.username) or GetPlayerName(sid) or ("Racer" .. sid)
+            list[#list + 1] = { source = sid, name = name }
+        end
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list
+end)
+
+-- ── Invites ───────────────────────────────────────────────────────────────────
+
+RegisterNetEvent("spz-hideseek:invite", function(targetSrc)
+    local src = source
+    targetSrc = tonumber(targetSrc)
+    if not lobby[src] then notify(src, "Join the lobby before inviting.", "error"); return end
+    if not targetSrc or not GetPlayerName(targetSrc) then notify(src, "That player isn't online.", "error"); return end
+    if lobby[targetSrc] then notify(src, "They're already queued.", "info"); return end
+    if round and round.players[targetSrc] then notify(src, "They're in a round.", "error"); return end
+    if lobbyCount() >= Config.MaxPlayers then notify(src, "Lobby full.", "error"); return end
+
+    local fromName = lobby[src].name
+    TriggerClientEvent("spz-hideseek:invited", targetSrc, { fromSrc = src, fromName = fromName })
+    notify(src, ("Invite sent to %s."):format(GetPlayerName(targetSrc) or "player"), "success")
+end)
+
+RegisterNetEvent("spz-hideseek:acceptInvite", function()
+    local src = source
+    if not lobby[src] then toggleJoin(src) end
+end)
 
 -- ── Disconnect ────────────────────────────────────────────────────────────────
 

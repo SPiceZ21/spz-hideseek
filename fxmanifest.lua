@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 name 'spz-hideseek'
-description 'SPiceZ Minigame — Traffic Hide & Seek. Hiders blend into NPC traffic, seekers find them by proximity. Credit wager, pot split to the winning side.'
-version '1.0.0'
+description 'SPiceZ Minigame — RC Hide & Seek. Everyone spawns as a tiny RC car in one contained zone; seekers find hiders by proximity. Free to play.'
+version '1.1.0'
 author 'SPiceZ-Core'
 lua54 'yes'
 

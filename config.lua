@@ -16,14 +16,16 @@ Config.LobbyWaitSec = 30    -- countdown armed by the first joiner
 Config.SeekerRatio = 0.34   -- ~1/3 seekers (min 1 seeker, 1 hider)
 Config.HideTimeSec = 45     -- head start: seekers frozen while hiders scatter
 Config.RoundTimeSec = 300   -- hiders survive this long to win
-Config.CatchDist   = 4.5    -- metres: seeker this close to a hider = caught
+Config.CatchDist   = 2.5    -- metres: seeker this close to a hider = caught (RC scale)
 
--- Dense-traffic arena the round is played in (hiders blend into NPC cars).
-Config.Arena = vector3(-260.0, -970.0, 31.2)   -- downtown Los Santos
-Config.SpawnSpread = 80.0                        -- players scatter within this radius
+-- ── RC car mode ─────────────────────────────────────────────────────────────
+-- Everyone — hiders and seekers — spawns as a tiny RC car and plays inside a
+-- single contained zone instead of full-size cars scattered across downtown
+-- traffic. Tune Arena to wherever you want the hiding spot to be (a yard,
+-- warehouse, garage — somewhere with clutter to hide a toy car behind).
+Config.Arena       = vector3(732.0, -1088.0, 22.0)   -- Cypress Flats yard
+Config.ZoneRadius  = 24.0    -- players are confined to this radius of Arena
+Config.SpawnSpread = 18.0    -- scatter radius at spawn — keep below ZoneRadius
 
--- Common "traffic-look" cars hiders spawn in so they blend with NPCs.
-Config.HiderModels = {
-  "blista", "asea", "premier", "washington", "asterope", "intruder",
-  "ingot", "stratum", "tailgater", "stanier", "primo", "regina",
-}
+-- RC vehicles to choose from in the car-select menu.
+Config.HiderModels = { "rcbandito", "rctank" }
