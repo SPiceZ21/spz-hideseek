@@ -175,6 +175,10 @@ local function startRound()
         local model = (m.carPref and inList(pool, m.carPref)) and m.carPref or pool[1]
         round.players[m.src] = { pid = m.pid, name = m.name, role = role, alive = true, model = model }
         if role == "seeker" then round.seekers[#round.seekers + 1] = m.src end
+        -- Same as joining a race: the freeroam car goes (spz-vehicles).
+        pcall(function()
+            if GetResourceState("spz-vehicles") == "started" then exports["spz-vehicles"]:DespawnVehicle(m.src) end
+        end)
         if bucketId ~= 0 then exports["spz-core"]:AssignPlayerToBucket(m.src, bucketId) end
     end
     lobby = {}
@@ -362,6 +366,21 @@ RegisterNetEvent("spz-hideseek:acceptInvite", function()
 end)
 
 -- ── Disconnect ────────────────────────────────────────────────────────────────
+
+-- "Leave minigame" from the Esc / radial menu: forfeit and go home.
+RegisterNetEvent("spz-hideseek:leave", function()
+    local src = source
+    if lobby[src] then lobby[src] = nil; return end
+    local p = round and round.players[src]
+    if not p then return end
+    round.players[src] = nil
+    TriggerClientEvent("spz-hideseek:over", src, { left = true, won = false, payout = 0 })
+    SetTimeout(600, function()
+        if GetPlayerName(src) and GetResourceState("spz-core") == "started" then
+            exports["spz-core"]:RemovePlayerFromBucket(src)
+        end
+    end)
+end)
 
 AddEventHandler("playerDropped", function()
     local src = source

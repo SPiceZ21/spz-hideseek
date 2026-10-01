@@ -166,6 +166,8 @@ end
 
 local function cleanup()
     active = false
+    LocalPlayer.state:set("inMinigame", false, false)
+    TriggerEvent("spz:minigameChanged")
     caught = false
     role = nil
     clearBlips()
@@ -182,8 +184,56 @@ local function cleanup()
     end
 end
 
+
+-- Countdown / GO clips from spz-raceUI (ui/public/aud), game audio as fallback.
+local function playClip(name)
+    if GetResourceState("spz-raceUI") == "started" then
+        local ok = pcall(function() exports["spz-raceUI"]:PlaySound(name, 1.0) end)
+        if ok then return end
+    end
+    if name == "go" then
+        PlaySoundFrontend(-1, "GO", "HUD_MINI_GAME_SOUNDSET", true)
+    else
+        PlaySoundFrontend(-1, "3_2_1", "HUD_MINI_GAME_SOUNDSET", true)
+    end
+end
+
+-- Big centred number for the 3-2-1, drawn for ~0.9 s.
+local function flashCount(txt, r, g, b)
+    CreateThread(function()
+        local untilAt = GetGameTimer() + 900
+        while GetGameTimer() < untilAt do
+            SetTextFont(4); SetTextScale(0.0, 2.2); SetTextCentre(true); SetTextOutline()
+            SetTextColour(r or 255, g or 255, b or 255, 240)
+            BeginTextCommandDisplayText("STRING")
+            AddTextComponentSubstringPlayerName(txt)
+            EndTextCommandDisplayText(0.5, 0.36)
+            Wait(0)
+        end
+    end)
+end
+
+
+-- Joining a minigame: despawn the freeroam car the player was driving, so it
+-- isn't left abandoned in freeroam (or dragged into the minigame world).
+local function despawnFreeroamCar()
+    local ped = PlayerPedId()
+    local veh = GetVehiclePedIsIn(ped, false)
+    if veh == 0 or GetPedInVehicleSeat(veh, -1) ~= ped then return end
+    local dl = GetGameTimer() + 1000
+    while not NetworkHasControlOfEntity(veh) and GetGameTimer() < dl do
+        NetworkRequestControlOfEntity(veh); Wait(0)
+    end
+    SetEntityAsMissionEntity(veh, true, true)
+    DeleteVehicle(veh)
+    if DoesEntityExist(veh) then DeleteEntity(veh) end
+end
+
+local lastCount = nil
 RegisterNetEvent("spz-hideseek:start", function(d)
     active = true
+    LocalPlayer.state:set("inMinigame", "Hide & Seek", false)
+    TriggerEvent("spz:minigameChanged")
     caught = false
     role   = d.role
     phase  = "hide"
@@ -194,6 +244,8 @@ RegisterNetEvent("spz-hideseek:start", function(d)
 
     local ped = PlayerPedId()
     myBack = GetEntityCoords(ped)
+    despawnFreeroamCar()
+    ped = PlayerPedId()
     zoneCenter = d.arena
     zoneRadius = d.zoneRadius or 24.0
 
@@ -218,8 +270,14 @@ RegisterNetEvent("spz-hideseek:start", function(d)
     DoScreenFadeIn(400)
 end)
 
+AddEventHandler("spz:leaveMinigame", function()
+    if active then TriggerServerEvent("spz-hideseek:leave") end
+end)
+
 RegisterNetEvent("spz-hideseek:release", function()
     phase = "seek"
+    lastCount = nil
+    playClip("go")
     if role == "seeker" then
         FreezeEntityPosition(PlayerPedId(), false)
         lib.notify({ title = "GO", description = "Find the hiders!", type = "info" })
@@ -242,10 +300,17 @@ end)
 RegisterNetEvent("spz-hideseek:state", function(s)
     phase = s.phase or phase
     state = s
+    -- Last three seconds of hiding: 3-2-1 for everyone.
+    local left = active and phase == "hide" and math.ceil(s.hideRemain or 0) or nil
+    if left and left >= 1 and left <= 3 and left ~= lastCount then
+        lastCount = left
+        flashCount(tostring(left))
+        playClip("countdown")
+    end
 end)
 
 RegisterNetEvent("spz-hideseek:over", function(r)
-    local msg = (r.winner == "seeker") and "Seekers win!" or "Hiders win!"
+    local msg = r.left and "You left the round" or ((r.winner == "seeker") and "Seekers win!" or "Hiders win!")
     if r.won then msg = msg .. (" +%d credits"):format(r.payout or 0) end
     DoScreenFadeOut(400)
     Wait(400)
