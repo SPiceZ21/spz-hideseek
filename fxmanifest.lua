@@ -3,7 +3,7 @@ game 'gta5'
 
 name 'spz-hideseek'
 description 'SPiceZ Minigame — RC Hide & Seek. Everyone spawns as a tiny RC car in one contained zone; seekers find hiders by proximity. Free to play.'
-version '1.1.0'
+version '1.2.0'
 author 'SPiceZ-Core'
 lua54 'yes'
 
