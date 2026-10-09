@@ -166,7 +166,7 @@ end
 
 local function cleanup()
     active = false
-    LocalPlayer.state:set("inMinigame", false, false)
+    TriggerServerEvent("spz:setPlayerFlag", "inMinigame", false)
     TriggerEvent("spz:minigameChanged")
     caught = false
     role = nil
@@ -232,7 +232,7 @@ end
 local lastCount = nil
 RegisterNetEvent("spz-hideseek:start", function(d)
     active = true
-    LocalPlayer.state:set("inMinigame", "Hide & Seek", false)
+    TriggerServerEvent("spz:setPlayerFlag", "inMinigame", "Hide & Seek")
     TriggerEvent("spz:minigameChanged")
     caught = false
     role   = d.role
