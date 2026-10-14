@@ -5,10 +5,12 @@
 -- hiders) blips seekers so they can evade. Catches are decided server-side.
 
 local active   = false
+local HUD      = exports["spz-minigames"]   -- shared in-game HUD (all on-screen text)
 local role     = nil     -- "hider" | "seeker"
 local caught   = false
 local phase    = "hide"
 local state    = { remain = 0, hideRemain = 0, aliveHiders = 0 }
+local myBackH
 local myBack   = nil
 local myVeh    = 0
 local seekerBlips = {}   -- [serverId] = blip (hiders only)
@@ -20,6 +22,15 @@ local lastBoundaryWarnAt = 0
 RegisterNetEvent("spz-hideseek:notify", function(msg, t)
     lib.notify({ description = msg, type = t or "info" })
 end)
+
+-- After a match everyone spawns at the hub's shared return point (DK garage).
+local function returnPoint(ped)
+    if GetResourceState("spz-minigames") == "started" then
+        local ok, p = pcall(function() return exports["spz-minigames"]:ReturnPoint() end)
+        if ok and p then return vector3(p.x, p.y, p.z), p.w end
+    end
+    return GetEntityCoords(ped), GetEntityHeading(ped)
+end
 
 -- ── Queue / invite / car-select menu (ox_lib context) ─────────────────────────
 -- Roles are shuffled at round start, so the car picked here just carries
@@ -166,6 +177,7 @@ end
 
 local function cleanup()
     active = false
+    HUD:Hud(nil)
     TriggerServerEvent("spz:setPlayerFlag", "inMinigame", false)
     TriggerEvent("spz:minigameChanged")
     caught = false
@@ -180,6 +192,7 @@ local function cleanup()
     SetEntityInvincible(ped, false)
     if myBack then
         SetEntityCoords(ped, myBack.x, myBack.y, myBack.z, false, false, false, false)
+        if myBackH then SetEntityHeading(ped, myBackH) end
         myBack = nil
     end
 end
@@ -198,19 +211,9 @@ local function playClip(name)
     end
 end
 
--- Big centred number for the 3-2-1, drawn for ~0.9 s.
-local function flashCount(txt, r, g, b)
-    CreateThread(function()
-        local untilAt = GetGameTimer() + 900
-        while GetGameTimer() < untilAt do
-            SetTextFont(4); SetTextScale(0.0, 2.2); SetTextCentre(true); SetTextOutline()
-            SetTextColour(r or 255, g or 255, b or 255, 240)
-            BeginTextCommandDisplayText("STRING")
-            AddTextComponentSubstringPlayerName(txt)
-            EndTextCommandDisplayText(0.5, 0.36)
-            Wait(0)
-        end
-    end)
+-- Big centred number for the 3-2-1, shown for ~0.9 s.
+local function flashCount(txt, color)
+    HUD:Flash(txt, color, 900)
 end
 
 
@@ -243,7 +246,7 @@ RegisterNetEvent("spz-hideseek:start", function(d)
     end
 
     local ped = PlayerPedId()
-    myBack = GetEntityCoords(ped)
+    myBack, myBackH = returnPoint(ped)
     despawnFreeroamCar()
     ped = PlayerPedId()
     zoneCenter = d.arena
@@ -315,7 +318,9 @@ RegisterNetEvent("spz-hideseek:over", function(r)
     DoScreenFadeOut(400)
     Wait(400)
     cleanup()
-    lib.notify({ title = "HIDE & SEEK", description = msg, type = r.won and "success" or "info", duration = 8000 })
+    HUD:Shard(r.left and "Left" or (r.winner == "seeker" and "Seekers win" or "Hiders win"),
+        r.won and ("You win  ·  +%d credits"):format(r.payout or 0) or (r.left and msg or "Better luck next round"),
+        r.won and "ok" or "bad", 6000)
     DoScreenFadeIn(600)
 end)
 
@@ -323,23 +328,29 @@ end)
 -- Everyone is confined to Config.ZoneRadius around Config.Arena — this is a
 -- contained RC-car pen, not open-world traffic. Enforced client-side (cheap,
 -- instant) since it's not competitive-integrity like the catch itself.
+local nextHudAt = 0
+
 CreateThread(function()
     while true do
         if active then
-            local label, timer
-            if phase == "hide" then
-                label = (role == "seeker") and "HOLD — HIDERS SCATTERING" or "HIDE NOW"
-                timer = fmt(state.hideRemain or 0)
-            else
-                label = caught and "CAUGHT — SPECTATING" or (role == "seeker" and "SEEK" or "STAY HIDDEN")
-                timer = fmt(state.remain or 0)
+            if GetGameTimer() >= nextHudAt then
+                nextHudAt = GetGameTimer() + 100
+                local label, timer, color
+                if phase == "hide" then
+                    label = (role == "seeker") and "Hold — hiders scattering" or "Hide now"
+                    timer, color = fmt(state.hideRemain or 0), "warn"
+                else
+                    label = caught and "Caught" or (role == "seeker" and "Seek" or "Stay hidden")
+                    timer, color = fmt(state.remain or 0), caught and "bad" or nil
+                end
+                HUD:Hud({
+                    chips = { { text = role == "seeker" and "Seeker" or "Hider", hot = true },
+                              ("%d hiders left"):format(state.aliveHiders or 0) },
+                    status = { label = label, value = timer, color = color },
+                    foot = caught and { text = "Spectating", color = "bad" } or nil,
+                    board = state.board,
+                })
             end
-
-            SetTextFont(4); SetTextScale(0.0, 0.5); SetTextCentre(true)
-            SetTextColour(255, 255, 255, 220); SetTextOutline()
-            BeginTextCommandDisplayText("STRING")
-            AddTextComponentSubstringPlayerName(("RC HIDE & SEEK  ·  %s  ·  %s  ·  %d hiders left"):format(label, timer, state.aliveHiders or 0))
-            EndTextCommandDisplayText(0.5, 0.03)
 
             if zoneCenter and myVeh ~= 0 and DoesEntityExist(myVeh) then
                 local c = GetEntityCoords(myVeh)

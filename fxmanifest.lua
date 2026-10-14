@@ -23,6 +23,7 @@ server_scripts {
 
 dependencies {
   'ox_lib',
+  'spz-minigames',   -- shared in-game HUD
   'oxmysql',
   'spz-core',
   'spz-identity',

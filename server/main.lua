@@ -229,6 +229,10 @@ CreateThread(function()
                                 local hped = GetPlayerPed(hsrc)
                                 if hped ~= 0 and #(sp - GetEntityCoords(hped)) < (Config.CatchDist or 4.5) then
                                     hp.alive = false
+                                    hp.caughtBy = round.players[sk] and round.players[sk].name or nil
+                                    if round.players[sk] then
+                                        round.players[sk].catches = (round.players[sk].catches or 0) + 1
+                                    end
                                     TriggerClientEvent("spz-hideseek:caught", hsrc, true)   -- you got caught
                                     TriggerClientEvent("spz-hideseek:caught", sk, false)     -- you caught someone
                                     for s in pairs(round.players) do
@@ -258,9 +262,31 @@ CreateThread(function()
                 for _, hp in pairs(round.players) do if hp.role == "hider" and hp.alive then aliveHiders = aliveHiders + 1 end end
                 local remain = math.max(0, math.floor((round.endsAt - GetGameTimer()) / 1000))
                 local hideRemain = math.max(0, math.floor((round.hideEndsAt - GetGameTimer()) / 1000))
+
+                -- Scoreboard: seekers (by catches) above hiders (hidden first).
+                local seekers, hiders = {}, {}
+                for src, hp in pairs(round.players) do
+                    if hp.role == "seeker" then
+                        seekers[#seekers + 1] = { src = src, name = hp.name, icon = "eye", color = "bad",
+                            value = ("%d caught"):format(hp.catches or 0), valueColor = (hp.catches or 0) > 0 and "ok" or "dim",
+                            _k = hp.catches or 0 }
+                    elseif hp.role == "hider" then
+                        hiders[#hiders + 1] = { src = src, name = hp.name, icon = "user-secret", color = "ok", out = not hp.alive,
+                            value = hp.alive and "Hidden" or "Caught", valueColor = hp.alive and "ok" or "bad",
+                            sub = (not hp.alive and hp.caughtBy) and ("by " .. hp.caughtBy) or nil }
+                    end
+                end
+                table.sort(seekers, function(a, b) return a._k > b._k end)
+                table.sort(hiders, function(a, b) if a.out ~= b.out then return not a.out end return a.name < b.name end)
+                local rows = {}
+                for _, row in ipairs(seekers) do row._k = nil; rows[#rows + 1] = row end
+                for i, row in ipairs(hiders) do row.sep = (i == 1 and #seekers > 0) or nil; rows[#rows + 1] = row end
+                local board = { title = "Players", numbered = false, rows = rows }
+
                 for src in pairs(round.players) do
                     TriggerClientEvent("spz-hideseek:state", src, {
                         phase = round.phase, remain = remain, hideRemain = hideRemain, aliveHiders = aliveHiders,
+                        board = board,
                     })
                 end
             end
