@@ -349,6 +349,7 @@ CreateThread(function()
                     status = { label = label, value = timer, color = color },
                     foot = caught and { text = "Spectating", color = "bad" } or nil,
                     board = state.board,
+                    keys = { { control = 200, default = "ESC", pad = "START_INDEX", label = "Menu · leave" } },   -- live binding (spz-minigames)
                 })
             end
 
